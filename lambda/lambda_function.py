@@ -1,13 +1,16 @@
 #coding:utf-8
 
 from requests_oauthlib import OAuth1Session
-from webscrape import webscrape
+from webscrape import getMoriHpNewsList
+from webscrape import getMoriHpScreenshot
+from subprocess import call
 import urllib3
 import os
 import sys
 import logging
 import rds_config
 import pymysql
+import tweepy
 
 CK = os.environ['CK']
 CS = os.environ['CS']
@@ -46,15 +49,17 @@ def lambda_handler(event, context):
     print(os.environ)
     getDataInMoriHpSql = "SELECT title,date,url FROM new_info_in_mori_hp ORDER BY id DESC LIMIT 10"
     putDataToMoriHpSql = "INSERT INTO new_info_in_mori_hp (title,date,url) VALUES (%s,%s,%s)"
+    imageUrl = "/tmp/screenshot.png"
 
     # 過去データの取得
     with connection.cursor() as cur:
         updateData = []
+        base_url = "https://www.town.hokkaido-mori.lg.jp/"
         cur.execute(getDataInMoriHpSql)
         pastData = cur.fetchall()
         print("### DBから取得したpastData")
         print(pastData)
-        newData = webscrape()
+        newData = getMoriHpNewsList(base_url)
         print("### Webから取得したnewData")
         print(newData)
         # updateData = set(newData) - set(pastData)
@@ -76,19 +81,26 @@ def lambda_handler(event, context):
         return "更新はありません"
     print("### WebにしかないupdateData")
     print(updateData)
-    print('## lambda_handler tweet')
+
     # print(tweet)
-    session = OAuth1Session(CK, CS, AT, AS)
+    # session = OAuth1Session(CK, CS, AT, AS)
+    print('## tweepyの処理 auth = tweepy.OAuthHandler(CK, CS)')
+    auth = tweepy.OAuthHandler(CK, CS)
+    print('## tweepyの処理 auth.set_access_token(AT, AS)')
+    auth.set_access_token(AT, AS)
+    print('## tweepyの処理 api = tweepy.API(auth, wait_on_rate_limit=True)')
+    api = tweepy.API(auth, wait_on_rate_limit=True)
     # params = {"status": tweet}
-    twitter = OAuth1Session(CK, CS, AT, AS)
+    # twitter = OAuth1Session(CK, CS, AT, AS)
 
     for tweet_data in updateData:
         tweet = tweet_data["title"] + '\n' + tweet_data[
             "date"] + '\n' + tweet_data["url"]
-        params = {"status": tweet}
-        req = twitter.post(URL, params=params)
+        print('### スクリーンショットの取得')
+        getMoriHpScreenshot(tweet_data["url"])
+        # params = {"status": tweet}
+        # req = twitter.post(URL, params=params)
+        status = api.update_with_media(filename=imageUrl, status=tweet)
+        call('rm -rf /tmp/*', shell=True)
 
-    if req.status_code == 200:
-        return str(len(updateData)) + '件tweetしました。'
-    else:
-        return req.status_code
+    return 'SUCCESS'
